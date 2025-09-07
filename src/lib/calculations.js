@@ -146,6 +146,113 @@ export const fetchStockData = async (symbol) => {
   }
 };
 
+// Real-time price fetching
+export const fetchRealTimePrice = async (symbol) => {
+  try {
+    const url = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const stockInfo = JSON.parse(data.contents);
+    
+    if (stockInfo.chart && stockInfo.chart.result && stockInfo.chart.result[0]) {
+      const result = stockInfo.chart.result[0];
+      const meta = result.meta;
+      
+      const currentPrice = meta.regularMarketPrice || meta.previousClose;
+      const previousClose = meta.previousClose;
+      const change = currentPrice - previousClose;
+      const changePercent = (change / previousClose) * 100;
+      
+      return {
+        symbol: symbol,
+        price: currentPrice,
+        change: change,
+        changePercent: changePercent,
+        currency: meta.currency || 'USD',
+        lastUpdate: new Date().toISOString(),
+        volume: meta.regularMarketVolume || 0
+      };
+    }
+    
+    throw new Error('לא ניתן לטעון מחיר עדכני');
+  } catch (error) {
+    console.error('Error fetching real-time price:', error);
+    throw error;
+  }
+};
+
+// Update portfolio with real-time prices
+export const updatePortfolioWithRealTimePrices = async (portfolio) => {
+  const updatedPortfolio = [];
+  
+  for (const stock of portfolio) {
+    try {
+      const realTimeData = await fetchRealTimePrice(stock.symbol);
+      updatedPortfolio.push({
+        ...stock,
+        currentPrice: realTimeData.price,
+        change: realTimeData.change,
+        changePercent: realTimeData.changePercent,
+        lastUpdate: realTimeData.lastUpdate,
+        volume: realTimeData.volume
+      });
+      
+      // Add small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 300));
+    } catch (error) {
+      console.error(`Error updating ${stock.symbol}:`, error);
+      // Keep original data if update fails
+      updatedPortfolio.push({
+        ...stock,
+        changePercent: 0,
+        lastUpdate: new Date().toISOString()
+      });
+    }
+  }
+  
+  return updatedPortfolio;
+};
+
+// Calculate portfolio statistics
+export const calculatePortfolioStats = (portfolio) => {
+  if (!portfolio || portfolio.length === 0) {
+    return {
+      totalValue: 0,
+      totalInvested: 0,
+      totalPnL: 0,
+      totalPnLPercent: 0,
+      stockCount: 0,
+      avgChange: 0
+    };
+  }
+
+  let totalValue = 0;
+  let totalInvested = 0;
+  let totalChange = 0;
+
+  portfolio.forEach(stock => {
+    const invested = stock.shares * stock.avgPrice;
+    const current = stock.shares * stock.currentPrice;
+    
+    totalValue += current;
+    totalInvested += invested;
+    totalChange += (stock.changePercent || 0);
+  });
+
+  const totalPnL = totalValue - totalInvested;
+  const totalPnLPercent = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+  const avgChange = portfolio.length > 0 ? totalChange / portfolio.length : 0;
+
+  return {
+    totalValue,
+    totalInvested,
+    totalPnL,
+    totalPnLPercent,
+    stockCount: portfolio.length,
+    avgChange
+  };
+};
+
 // Generate auto calculation estimates
 export const generateAutoEstimates = (stockData) => {
   let growth = 12;
